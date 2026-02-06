@@ -1,0 +1,19 @@
+[project]
+name = "python-tools-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.42.39",
+    "fastapi>=0.128.0",
+    "loguru>=0.7.3",
+    "pandas>=3.0.0",
+    "pyarrow>=23.0.0",
+    "pydantic-settings>=2.12.0",
+    "pyodbc>=5.3.0",
+    "python-dotenv>=1.2.1",
+    "s3fs>=0.4.2",
+    "sqlalchemy>=2.0.46",
+    "uvicorn>=0.40.0",
+]
