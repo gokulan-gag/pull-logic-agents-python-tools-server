@@ -12,6 +12,9 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    # Environment
+    ENV: str
+
     # Database Settings
     DB_DRIVER: str = "ODBC Driver 18 for SQL Server"
     DB_SERVER: str
@@ -35,10 +38,5 @@ class Settings(BaseSettings):
 
     # API Settings
     PROJECT_NAME: str = "Python Tools Server"
-
-    # S3 Settings for TYM
-    S3_TYM_DEMAND_FORECAST_PARQUET_FILE_KEY: str = "computationfiles/f80d6409-cb1d-4af1-8e1c-1b90f657b9bd/963b770e-595f-4f76-a172-503246d6cf13/data-analytics/demand-forecast/demand_forecast.parquet"
-    S3_TYM_REGION_TIME_SERIES_CONFIG_FILE_KEY: str = "computationfiles/f80d6409-cb1d-4af1-8e1c-1b90f657b9bd/963b770e-595f-4f76-a172-503246d6cf13/aiagents-access/region_time_series_config.json"
-
 # Singleton instance
 settings = Settings()

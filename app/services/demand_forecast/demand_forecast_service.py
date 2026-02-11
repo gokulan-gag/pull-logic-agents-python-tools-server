@@ -9,14 +9,18 @@ from app.services.sales.sales_service import SalesService
 from app.schemas.demand_forecast import DemandForecastParams, DemandForecastResponse
 import json
 
-class DemandForecastService:
+from app.services.demand_forecast.base import IDemandForecastService
+from app.core.client_config import ClientConfig
+
+class TymDemandForecastService(IDemandForecastService):
     """
-    OOPS-based Service for handling Demand Forecast calculations.
+    TYM-specific implementation for handling Demand Forecast calculations.
     """
 
-    def __init__(self):
+    def __init__(self, config: ClientConfig):
+        self.config = config
         self.bucket = settings.AWS_S3_BUCKET
-        self.forecast_parquet_file_key = settings.S3_TYM_DEMAND_FORECAST_PARQUET_FILE_KEY
+        self.forecast_parquet_file_key = config.s3_demand_forecast_parquet_key
         # Do not initialize sales_service here with a single session.
         # It should be initialized per request or use fresh sessions.
         self.forecast_uncertanity_filter_names = ["0.0062", "0.0228", "0.1587", "0.8413", "0.9772", "0.9938"]
@@ -125,7 +129,7 @@ class DemandForecastService:
         if params.filter_name == "Region" and params.filter_value.lower() != "all":
             try:
                 # Use a dict-returning method for configuration JSONs
-                region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=settings.S3_TYM_REGION_TIME_SERIES_CONFIG_FILE_KEY)
+                region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
 
                 if params.filter_value in region_time_series_config:
                     seasonality, trend = self._calculate_seasonality_and_trend(
@@ -458,6 +462,3 @@ class DemandForecastService:
 
         # If no previous month data is available, return the current month's cumulative demand        
         return current_cum, len(current_month_data)
-
-# Global instance
-demand_forecast_service = DemandForecastService()

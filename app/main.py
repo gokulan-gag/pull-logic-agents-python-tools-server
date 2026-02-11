@@ -5,14 +5,23 @@ from app.lib.database import get_db
 from app.lib.logger import setup_logging
 from app.lib.exceptions import register_error_handlers
 from app.routers.demand_forecast import router as demand_forecast_router
+from app.routers.inventory_analysis import router as inventory_analysis_router
 from app.core.config import settings
+from fastapi.middleware.cors import CORSMiddleware
 
 # Initialize structured logging
 log = setup_logging()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Production-grade FastAPI server with MSSQL pooling and structured logging."
+    description="Production-grade FastAPI server with MSSQL pooling and structured logging.",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Register global exception handlers and middleware
@@ -40,3 +49,4 @@ def test_error():
     raise Exception("This is a manual test error")
 
 app.include_router(demand_forecast_router)
+app.include_router(inventory_analysis_router)
