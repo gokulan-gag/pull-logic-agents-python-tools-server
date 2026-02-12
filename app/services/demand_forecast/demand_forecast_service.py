@@ -6,8 +6,7 @@ from app.lib.s3_client import s3_client
 from app.lib.logger import log
 from app.lib.database import db_manager
 from app.services.sales.sales_service import SalesService
-from app.schemas.demand_forecast import DemandForecastParams, DemandForecastResponse
-import json
+from app.schemas.demand_forecast import DemandForecastRequest, DemandForecastResponse
 
 from app.services.demand_forecast.base import IDemandForecastService
 from app.core.client_config import ClientConfig
@@ -34,7 +33,7 @@ class TymDemandForecastService(IDemandForecastService):
             0.0062: "99%",
         }
 
-    def get_forecast_explanation(self, params: DemandForecastParams) -> DemandForecastResponse:
+    def get_forecast_explanation(self, params: DemandForecastRequest) -> DemandForecastResponse:
         """
         Main entry point to fetch data and calculate metrics.
         """
@@ -46,7 +45,7 @@ class TymDemandForecastService(IDemandForecastService):
             log.exception(f"Failed to get demand forecast explanation: {e}")
             raise e
 
-    def _calculate_metrics(self, df: pd.DataFrame, params: DemandForecastParams) -> DemandForecastResponse:
+    def _calculate_metrics(self, df: pd.DataFrame, params: DemandForecastRequest) -> DemandForecastResponse:
         """
         Internal method to coordinate calculations.
         """
@@ -141,6 +140,15 @@ class TymDemandForecastService(IDemandForecastService):
                     log.warning(f"Region {params.filter_value} not found in time series config")
             except Exception as e:
                 log.error(f"Error calculating seasonality and trend: {e}")
+
+        elif params.filter_name == "Region" and params.filter_value.lower() == "all":
+            try:
+                region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
+
+                
+
+            except Exception as e:
+                log.error(f"Error calculating all regions seasonality and trend: {e}")
         
 
         # Assemble final response
@@ -166,7 +174,7 @@ class TymDemandForecastService(IDemandForecastService):
             }
         )
 
-    def _filter_data(self, df: pd.DataFrame, params: DemandForecastParams, forecast_filter_names: list[str] = ["MeanPL", "MedianPL", "ModePL"]) -> pd.DataFrame:
+    def _filter_data(self, df: pd.DataFrame, params: DemandForecastRequest, forecast_filter_names: list[str] = ["MeanPL", "MedianPL", "ModePL"]) -> pd.DataFrame:
         """
         Filters the dataframe based on Name, Filter Name, Filter Value and Series ID.
         """
@@ -254,7 +262,7 @@ class TymDemandForecastService(IDemandForecastService):
             log.exception(f"Error calculating change vs previous month actual sales: {e}")
             return 0.0, 0.0, 0.0
 
-    def _calculate_change_vs_same_month_last_yeat(self, sales_service: SalesService, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastParams) -> tuple[float, float, float]:
+    def _calculate_change_vs_same_month_last_yeat(self, sales_service: SalesService, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest) -> tuple[float, float, float]:
         """
         Calculates the percentage change for current month forecasted demand vs same month last year.
         Uses the Sales table for actual sales data.
@@ -426,6 +434,31 @@ class TymDemandForecastService(IDemandForecastService):
             
         except Exception as e:
             log.error(f"Error in _calculate_seasonality_and_trend: {e}")
+            return 0.0, 0.0
+
+    def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp) -> Optional[tuple[float, int]]:
+        
+        """ 
+            Returns the seasonality and trend for all regions.
+        """
+
+        try:
+                region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
+
+                for region in region_time_series_config:
+                    print("region...", region)
+                    # seasonality, trend = self._calculate_seasonality_and_trend(
+                    #     target_date=target_date,
+                    #     region_time_series_config=region_time_series_config,
+                    #     region_name=region
+                    # )
+                
+                # Calculate MeanPL for all regions
+                meanpl = df.groupby('region')['pl'].mean().reset_index()
+                print("meanpl...", meanpl)
+
+        except Exception as e:
+            log.error(f"Error calculating all regions seasonality and trend: {e}")
             return 0.0, 0.0
 
 

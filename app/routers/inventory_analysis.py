@@ -5,7 +5,7 @@ from app.services.inventory_analysis.factory import InventoryAnalysisServiceFact
 from app.core.client_config import get_client_config, ClientConfig
 from app.lib.logger import log
 
-router = APIRouter(prefix="/api/inventory", tags=["inventory"])
+router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 def get_config(x_company_id: str = Header(..., alias="x-company-id")) -> ClientConfig:
     """

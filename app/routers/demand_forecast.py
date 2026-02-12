@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Header
 from app.services.demand_forecast.base import IDemandForecastService
 from app.services.demand_forecast.factory import DemandForecastServiceFactory
-from app.schemas.demand_forecast import DemandForecastParams, DemandForecastResponse
+from app.schemas.demand_forecast import DemandForecastRequest, DemandForecastResponse
 from app.lib.logger import log
 from app.core.client_config import get_client_config, ClientConfig
 
-router = APIRouter(prefix="/api/demand-forecast", tags=["Demand Forecast"])
+router = APIRouter(prefix="/demand-forecast", tags=["Demand Forecast"])
 
 def get_config(x_company_id: str = Header(..., alias="x-company-id")) -> ClientConfig:
     """
@@ -28,7 +28,7 @@ def get_service(config: ClientConfig = Depends(get_config)) -> IDemandForecastSe
 
 @router.post("/", response_model=DemandForecastResponse)
 def get_demand_forecast(
-    params: DemandForecastParams = Depends(),
+    request: DemandForecastRequest,
     x_company_id: str = Header(..., alias="x-company-id"),
     service: IDemandForecastService = Depends(get_service)
 ):
@@ -36,8 +36,8 @@ def get_demand_forecast(
     Endpoint to get demand forecast details.
     """
     try:        
-        params.company_id = x_company_id
-        result = service.get_forecast_explanation(params)
+        request.company_id = x_company_id
+        result = service.get_forecast_explanation(request)
         return result
     except Exception as e:
         log.exception(f"Failed to explain demand forecast: {e}")

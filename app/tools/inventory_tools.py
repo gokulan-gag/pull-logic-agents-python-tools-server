@@ -2,7 +2,7 @@ from app.services.inventory_analysis.factory import InventoryAnalysisServiceFact
 from app.core.client_config import get_client_config
 import json
 from typing import Dict, Any
-from app.schemas.inventory_analysis import InventoryAnalysisRequest, InventoryAnalysisRequestWithSelection
+from app.schemas.inventory_analysis import InventoryAnalysisRequestWithSelection, InventoryAnalysisRequestWithSelection
 from app.core.context import get_company_id
 
 class InventoryTools:
@@ -21,7 +21,7 @@ class InventoryTools:
         print("Request received for inventory analysis:", request)
         try:
             # Convert dict to Pydantic model
-            req_model = InventoryAnalysisRequest(**request)
+            req_model = InventoryAnalysisRequestWithSelection(**request)
             service = self._get_service()
             response = await service.get_enough_stock(req_model)
             

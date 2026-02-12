@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
-class DemandForecastParams(BaseModel):
+class DemandForecastRequest(BaseModel):
     region: str = "All"
     forecast_date: str = "2026-12-07"
     period: str = "cumulative"
@@ -19,8 +19,8 @@ class DemandForecastMetadata(BaseModel):
     series_id: Optional[str] = None
 
 class DemandForecastResponse(BaseModel):
-    forecasted_demand: float
-    average_demand_per_week: float
+    forecasted_demand: Optional[float] = None
+    average_demand_per_week: Optional[float] = None
     change_vs_last_month_actual_sales: float = 0.0
     change_vs_same_month_last_year: float = 0.0
     coefficient_of_variation: float = 0.0
@@ -32,3 +32,4 @@ class DemandForecastResponse(BaseModel):
     seasonality: Optional[float] = None
     confidence_interval: Optional[Dict[str, Any]] = None
     metadata: Optional[DemandForecastMetadata] = None
+    error: Optional[str] = None
