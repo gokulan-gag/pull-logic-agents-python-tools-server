@@ -34,7 +34,7 @@ class S3Client:
             log.info(f"Successfully read parquet with {len(df)} rows")
             return df
         except Exception as e:
-            log.error(f"Error reading parquet from s3://{bucket}/{key}: {e}")
+            log.error(f"Error reading parquet from s3://{bucket}/{key}: {str(e)}")
             raise e
     
     def read_json(self, bucket: str, key: str) -> pd.DataFrame:
@@ -53,7 +53,7 @@ class S3Client:
             log.info(f"Successfully read json with {len(df)} rows")
             return df
         except Exception as e:
-            log.error(f"Error reading json from s3://{bucket}/{key}: {e}")
+            log.error(f"Error reading json from s3://{bucket}/{key}: {str(e)}")
             raise e
 
     def read_json_as_dict(self, bucket: str, key: str) -> dict:
@@ -68,7 +68,7 @@ class S3Client:
             
             return data
         except Exception as e:
-            log.error(f"Error reading json from s3://{bucket}/{key}: {e}")
+            log.error(f"Error reading json from s3://{bucket}/{key}: {str(e)}")
             raise e
 
 # Singleton instance

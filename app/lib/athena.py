@@ -2,6 +2,7 @@ from app.core.config import settings
 import asyncio
 import boto3
 from typing import Optional, Dict, Any, TypeVar
+from app.lib.logger import log
 
 T = TypeVar('T')
 
@@ -99,7 +100,7 @@ class AthenaClient:
             }
 
         except Exception as e:
-            print(f"Athena query error: {str(e)}")
+            log.error(f"Athena query error: {str(e)}")
             raise Exception(f"Athena query failed: {str(e)}")
 
 athena_client = AthenaClient()

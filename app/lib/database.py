@@ -62,7 +62,7 @@ class DatabaseManager:
             
             log.info(f"Successfully initialized DB engine for {server}")
         except Exception as e:
-            log.error(f"Error initializing database engine: {e}")
+            log.error(f"Error initializing database engine: {str(e)}")
             raise e
 
     def get_session(self) -> Session:

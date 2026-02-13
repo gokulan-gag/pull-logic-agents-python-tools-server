@@ -139,7 +139,7 @@ class TymDemandForecastService(IDemandForecastService):
                 else:
                     log.warning(f"Region {params.filter_value} not found in time series config")
             except Exception as e:
-                log.error(f"Error calculating seasonality and trend: {e}")
+                log.error(f"Error calculating seasonality and trend: {str(e)}")
 
         elif params.filter_name == "Region" and params.filter_value.lower() == "all":
             try:
@@ -149,7 +149,7 @@ class TymDemandForecastService(IDemandForecastService):
                     params=params
                 )
             except Exception as e:
-                log.error(f"Error calculating all regions seasonality and trend: {e}")
+                log.error(f"Error calculating all regions seasonality and trend: {str(e)}")
         
 
         # Assemble final response
@@ -447,7 +447,7 @@ class TymDemandForecastService(IDemandForecastService):
             return float(seasonality), float(trend)
             
         except Exception as e:
-            log.error(f"Error in _calculate_seasonality_and_trend: {e}")
+            log.error(f"Error in _calculate_seasonality_and_trend: {str(e)}")
             return 0.0, 0.0
 
     def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest) -> tuple[float, float]:
@@ -516,7 +516,7 @@ class TymDemandForecastService(IDemandForecastService):
             return round(float(total_weighted_seasonality), 4), round(float(total_weighted_trend), 4)
 
         except Exception as e:
-            log.error(f"Error calculating all regions seasonality and trend: {e}")
+            log.error(f"Error calculating all regions seasonality and trend: {str(e)}")
             return 0.0, 0.0
 
 
