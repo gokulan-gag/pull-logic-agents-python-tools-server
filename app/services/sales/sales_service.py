@@ -1,3 +1,4 @@
+from typing import Any
 from dateutil.relativedelta import relativedelta
 from datetime import date
 from app.repos.sales.sales_repo import SalesRepo
@@ -40,7 +41,7 @@ class SalesService:
         company_id: str, 
         sales_type: str,
         region_name: str
-    ) -> float:
+    ) -> list[dict[str, Any]]:
         """
         Calculates the total units sold for a specific company in a given month.
         """

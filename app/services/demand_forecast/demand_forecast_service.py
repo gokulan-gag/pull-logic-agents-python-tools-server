@@ -88,7 +88,7 @@ class TymDemandForecastService(IDemandForecastService):
         db = db_manager.get_session()
         try:
             sales_service = SalesService(db)
-            change_vs_same_month_last_year, same_month_last_year_actual_sales, _ = self._calculate_change_vs_same_month_last_yeat(
+            change_vs_same_month_last_year, same_month_last_year_actual_sales, _ = self._calculate_change_vs_same_month_last_year(
                             sales_service=sales_service,
                             df=filtered_df, 
                             target_date=target_date, 
@@ -143,10 +143,11 @@ class TymDemandForecastService(IDemandForecastService):
 
         elif params.filter_name == "Region" and params.filter_value.lower() == "all":
             try:
-                region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
-
-                
-
+                seasonality, trend = self._calculate_all_regions_seasonality_and_trend(
+                    df=df,
+                    target_date=target_date,
+                    params=params
+                )
             except Exception as e:
                 log.error(f"Error calculating all regions seasonality and trend: {e}")
         
@@ -262,7 +263,7 @@ class TymDemandForecastService(IDemandForecastService):
             log.exception(f"Error calculating change vs previous month actual sales: {e}")
             return 0.0, 0.0, 0.0
 
-    def _calculate_change_vs_same_month_last_yeat(self, sales_service: SalesService, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest) -> tuple[float, float, float]:
+    def _calculate_change_vs_same_month_last_year(self, sales_service: SalesService, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest) -> tuple[float, float, float]:
         """
         Calculates the percentage change for current month forecasted demand vs same month last year.
         Uses the Sales table for actual sales data.
@@ -302,7 +303,7 @@ class TymDemandForecastService(IDemandForecastService):
             log.exception(f"Error calculating change vs same month last year actual sales: {e}")
             return 0.0, 0.0, 0.0
     
-    def _calculate_cv(self, sales_service: SalesService, target_date: pd.Timestamp, company_id: str, sales_type: str, region_name: str) -> tuple[float, list[float]]:
+    def _calculate_cv(self, sales_service: SalesService, target_date: pd.Timestamp, company_id: str, sales_type: str, region_name: str) -> tuple[float, dict[str, float]]:
         try:
             forecast_result = sales_service.get_last_12_months_yoy_sales_total(
                 company_id=company_id,
@@ -312,7 +313,7 @@ class TymDemandForecastService(IDemandForecastService):
             
             if not forecast_result or len(forecast_result) == 0:
                 log.warning("No sales data found for CV calculation")
-                return 0.0
+                return 0.0, {}
             
             # Organize data by month
             months_data = {}
@@ -322,39 +323,52 @@ class TymDemandForecastService(IDemandForecastService):
                     months_data[month] = []
                 months_data[month].append(row)
 
-            percentage_changes = []
-            for month, data in months_data.items():
+            percentage_changes_dict = {}
+            values_for_stats = []
+            for month_num, data in months_data.items():
                 if len(data) >= 2:
                     # Sort by year to ensure we compare two consecutive or available years
                     sorted_data = sorted(data, key=lambda x: x['SalesYear'])
                     # Take the two most recent available years for this month
-                    curr_year_sales = sorted_data[-1]['TotalUnitsSold']
-                    prev_year_sales = sorted_data[-2]['TotalUnitsSold']
+
+                    curr = sorted_data[-1]
+                    prev = sorted_data[-2]
+                    
+                    curr_year_sales = curr['TotalUnitsSold']
+                    prev_year_sales = prev['TotalUnitsSold']
                     
                     if prev_year_sales > 0:
                         change = (curr_year_sales - prev_year_sales) / prev_year_sales
-                        percentage_changes.append(change)
+                        
+                        # Format the key: 'Feb '25 vs Feb '24'
+                        month_name = pd.to_datetime(f"2000-{month_num}-01").strftime('%b')
+                        curr_yy = str(curr['SalesYear'])[-2:]
+                        prev_yy = str(prev['SalesYear'])[-2:]
+                        key = f"{month_name} '{curr_yy} vs {month_name} '{prev_yy}"
+                        
+                        percentage_changes_dict[key] = change
+                        values_for_stats.append(change)
             
-            if not percentage_changes:
+            if not values_for_stats:
                 log.warning("Not enough year-over-year data points for CV calculation")
-                return 0.0
+                return 0.0, {}
             
             # Calculate mean and standard deviation
-            mean_change = np.mean(percentage_changes)
-            std_change = np.std(percentage_changes)
+            mean_change = np.mean(values_for_stats)
+            std_change = np.std(values_for_stats)
             
             if mean_change == 0:
-                return 0.0
+                return 0.0, percentage_changes_dict
                 
             cv = std_change / mean_change
-            log.info(f"CV Calculation Points: {percentage_changes}")
+            log.info(f"CV Calculation Points: {values_for_stats}")
             log.info(f"CV Calculation Stats: mean={mean_change:.4f}, std={std_change:.4f}, cv={cv:.4f}")
             
-            return round(float(cv), 4), percentage_changes
+            return round(float(cv), 4), percentage_changes_dict
 
         except Exception as e:
             log.exception(f"Error calculating CV: {e}")
-            return 0.0
+            return 0.0, {}
 
     def _get_forecast_confidence(self, df: pd.DataFrame, target_date: pd.Timestamp) -> Optional[dict]:
         
@@ -436,26 +450,70 @@ class TymDemandForecastService(IDemandForecastService):
             log.error(f"Error in _calculate_seasonality_and_trend: {e}")
             return 0.0, 0.0
 
-    def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp) -> Optional[tuple[float, int]]:
-        
+    def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest) -> tuple[float, float]:
         """ 
-            Returns the seasonality and trend for all regions.
+        Returns the weighted seasonality and trend for all regions.
         """
-
         try:
-                region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
+            # 1. Calculate demand share for each region
+            # Take MeanPL for each region from the next 12th month from the min-date
+            min_date = df['forecast_date'].min()
+            target_share_date = min_date + pd.DateOffset(months=12)
+            
+            # Filter for MeanPL and series_id
+            mean_pl_df = df[
+                (df['name'] == 'MeanPL') & 
+                (df['filter_name'] == 'Region') & 
+                (df['series_id'] == params.series_id)
+            ].copy()
+            
+            if mean_pl_df.empty:
+                log.warning("No MeanPL data found for demand share calculation")
+                return 0.0, 0.0
 
-                for region in region_time_series_config:
-                    print("region...", region)
-                    # seasonality, trend = self._calculate_seasonality_and_trend(
-                    #     target_date=target_date,
-                    #     region_time_series_config=region_time_series_config,
-                    #     region_name=region
-                    # )
-                
-                # Calculate MeanPL for all regions
-                meanpl = df.groupby('region')['pl'].mean().reset_index()
-                print("meanpl...", meanpl)
+            # Find data closest to 12 months after min_date
+            # We'll look for the latest date in the target month (next 12th month)
+            target_month_data = mean_pl_df[
+                (mean_pl_df['forecast_date'].dt.year == target_share_date.year) &
+                (mean_pl_df['forecast_date'].dt.month == target_share_date.month)
+            ]
+            
+            if target_month_data.empty:
+                # Fallback: take the last date available for each region if 12th month is not yet reached
+                log.warning(f"No data found for target share date {target_share_date}, using last available data for each region")
+                region_mean_pl = mean_pl_df.sort_values('forecast_date').groupby('filter_value').last()['prediction_cum']
+            else:
+                # Take the last record of the target month for each region
+                region_mean_pl = target_month_data.sort_values('forecast_date').groupby('filter_value').last()['prediction_cum']
+
+            region_mean_pl = region_mean_pl.drop(index='ALL', errors='ignore')
+
+            total_mean_pl = region_mean_pl.sum()
+            if total_mean_pl == 0:
+                log.warning("Total MeanPL is zero, cannot calculate demand share")
+                return 0.0, 0.0
+
+            demand_shares = region_mean_pl / total_mean_pl
+            
+            # 2. Calculate weighted seasonality and trend
+            region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
+            
+            total_weighted_seasonality = 0.0
+            total_weighted_trend = 0.0
+            
+            for region, share in demand_shares.items():
+                if region in region_time_series_config:
+                    region_seasonality, region_trend = self._calculate_seasonality_and_trend(
+                        target_date=target_date,
+                        region_time_series_config=region_time_series_config,
+                        region_name=region
+                    )
+                    total_weighted_seasonality += region_seasonality * share
+                    total_weighted_trend += region_trend * share
+                else:
+                    log.warning(f"Region {region} found in forecast data but missing in seasonality config")
+
+            return round(float(total_weighted_seasonality), 4), round(float(total_weighted_trend), 4)
 
         except Exception as e:
             log.error(f"Error calculating all regions seasonality and trend: {e}")

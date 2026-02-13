@@ -27,7 +27,7 @@ class DemandForecastResponse(BaseModel):
     current_month_forecasted_demand: float = 0.0
     prev_month_actual_sales: float = 0.0
     same_month_last_year_actual_sales: float = 0.0
-    actual_sales_yoy_percentage_changes: list[float] = []
+    actual_sales_yoy_percentage_changes: dict[str, float] = {}
     trend: Optional[float] = None
     seasonality: Optional[float] = None
     confidence_interval: Optional[Dict[str, Any]] = None

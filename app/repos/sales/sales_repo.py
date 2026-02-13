@@ -1,3 +1,4 @@
+from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from datetime import date
@@ -63,7 +64,7 @@ class SalesRepo:
         end_date: date,
         sales_type: str,
         region_name: str
-    ) -> float:
+    ) -> list[dict[str, Any]]:
         """
         Fetches UnitsSold and SalesDate from the Sales table for a specific company and date range.
         """
