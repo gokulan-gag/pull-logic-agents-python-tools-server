@@ -163,7 +163,7 @@ class TymDemandForecastService(IDemandForecastService):
                     region_time_series_config=region_time_series_config
                 )
 
-                self._calculate_all_regions_monthly_seasonality(
+                all_months_seasonality = self._calculate_all_regions_monthly_seasonality(
                     df=df,
                     region_time_series_config=region_time_series_config,
                     filter_name=params.filter_name,
@@ -565,6 +565,31 @@ class TymDemandForecastService(IDemandForecastService):
             log.error(f"Error calculating all regions seasonality and trend: {str(e)}")
             return 0.0, 0.0
 
+    def _calculate_all_regions_monthly_seasonality(self, df: pd.DataFrame,region_time_series_config: dict, filter_name: str, series_id: int) -> dict:
+        try:
+
+            all_regions_monthly_sum_dict = {}
+
+            for region_name in region_time_series_config:
+                monthly_sum_dict = self._calculate_region_specific_monthly_seasonality(region_time_series_config, region_name)
+                all_regions_monthly_sum_dict[region_name] = monthly_sum_dict
+            
+            demand_shares = self._calculate_demand_shares(df=df, filter_name=filter_name, series_id=series_id)
+            
+            weighted_monthly_seasonality = {}
+            for region, region_monthly_data in all_regions_monthly_sum_dict.items():
+                for month, monthly_sum in region_monthly_data.items():
+
+                    if month not in weighted_monthly_seasonality:
+                        weighted_monthly_seasonality[month] = 0.0
+                    
+                    weighted_monthly_seasonality[month] += monthly_sum * demand_shares[region]
+
+            return weighted_monthly_seasonality
+
+        except Exception as e:
+            log.error(f"Error calculating all regions monthly seasonality: {str(e)}")
+            return {}
 
     def _get_current_month_forecasted_demand(self, df: pd.DataFrame, target_date: pd.Timestamp) -> Optional[tuple[float, int]]:
         
