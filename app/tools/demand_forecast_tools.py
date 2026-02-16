@@ -32,7 +32,7 @@ class DemandForecastTools:
             else:
                 response_dict = result
                 
-            json_output = json.dumps(response_dict, indent=2)
+            json_output = json.dumps(response_dict, indent=2, default=str)
             log.info(f"Response received for demand forecast: {json_output}")
             
             return {
@@ -43,7 +43,7 @@ class DemandForecastTools:
             log.error(f"Error calling demand forecast: {str(e)}")
             error_output = {"error": f"Unexpected error: {str(e)}"}
             return {
-                "content": [{"type": "text", "text": json.dumps(error_output, indent=2)}],
+                "content": [{"type": "text", "text": json.dumps(error_output, indent=2, default=str)}],
                 "structuredContent": error_output
             }
 

@@ -40,5 +40,5 @@ def get_demand_forecast(
         result = service.get_forecast_explanation(request)
         return result
     except Exception as e:
-        log.exception(f"Failed to explain demand forecast: {e}")
+        log.error(f"Failed to explain demand forecast: {e}")
         raise HTTPException(status_code=500, detail=str(e))

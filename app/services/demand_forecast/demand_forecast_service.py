@@ -1,3 +1,4 @@
+from datetime import datetime
 import pandas as pd
 import numpy as np
 from typing import Optional
@@ -15,6 +16,9 @@ class TymDemandForecastService(IDemandForecastService):
     """
     TYM-specific implementation for handling Demand Forecast calculations.
     """
+
+    # Class-level cache for monthly seasonality calculations
+    _monthly_seasonality_cache: dict[str, dict[int, float]] = {}
 
     def __init__(self, config: ClientConfig):
         self.config = config
@@ -55,7 +59,9 @@ class TymDemandForecastService(IDemandForecastService):
         
         # Filter Data
         filtered_df = self._filter_data(df, params, self.forecast_mean_filter_names)
-        
+
+        forecast_generated_date = self._calculate_forcast_generated_date(filtered_df)
+
         if filtered_df.empty:
             return DemandForecastResponse(
                 forecasted_demand=0.0,
@@ -124,11 +130,13 @@ class TymDemandForecastService(IDemandForecastService):
         # Calculate Seasonality and Trend for if the requested filter_name is specific Region and not all Region
         seasonality = None
         trend = None
+        all_months_seasonality = {}
 
+        region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
+                
         if params.filter_name == "Region" and params.filter_value.lower() != "all":
             try:
                 # Use a dict-returning method for configuration JSONs
-                region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
 
                 if params.filter_value in region_time_series_config:
                     seasonality, trend = self._calculate_seasonality_and_trend(
@@ -136,6 +144,8 @@ class TymDemandForecastService(IDemandForecastService):
                         region_time_series_config=region_time_series_config,
                         region_name=params.filter_value
                     )
+
+                    all_months_seasonality = self._calculate_region_specific_monthly_seasonality(region_time_series_config=region_time_series_config, region_name=params.filter_value)
                 else:
                     log.warning(f"Region {params.filter_value} not found in time series config")
             except Exception as e:
@@ -146,7 +156,8 @@ class TymDemandForecastService(IDemandForecastService):
                 seasonality, trend = self._calculate_all_regions_seasonality_and_trend(
                     df=df,
                     target_date=target_date,
-                    params=params
+                    params=params,
+                    region_time_series_config=region_time_series_config
                 )
             except Exception as e:
                 log.error(f"Error calculating all regions seasonality and trend: {str(e)}")
@@ -165,7 +176,9 @@ class TymDemandForecastService(IDemandForecastService):
             actual_sales_yoy_percentage_changes=actual_sales_yoy_percentage_changes,
             seasonality=seasonality,
             trend=trend,
+            forecast_generated_date=forecast_generated_date,
             confidence_interval=confidence_interval,
+            all_months_seasonality=all_months_seasonality,
             metadata={
                 "target_date": str(target_date.date()),
                 "filter_name": params.filter_name,
@@ -174,6 +187,17 @@ class TymDemandForecastService(IDemandForecastService):
                 "period": params.period,
             }
         )
+    
+    def _calculate_forcast_generated_date(self, df: pd.DataFrame) -> datetime:
+        """
+        Calculates the forecast generated date based on the minimum forecast date in the dataframe.
+        """
+
+        min_date = df['forecast_date'].min()
+
+        min_date = min_date.replace(day=1)
+
+        return min_date.to_pydatetime()
 
     def _filter_data(self, df: pd.DataFrame, params: DemandForecastRequest, forecast_filter_names: list[str] = ["MeanPL", "MedianPL", "ModePL"]) -> pd.DataFrame:
         """
@@ -407,6 +431,31 @@ class TymDemandForecastService(IDemandForecastService):
 
         return result
 
+    def _calculate_region_specific_monthly_seasonality(self, region_time_series_config: dict, region_name: str) -> dict:
+        # Check if already in cache
+        if region_name in self._monthly_seasonality_cache:
+            return self._monthly_seasonality_cache[region_name]
+        
+        seasonality_weekly_values = region_time_series_config[region_name]["week_of_year_seasonality"]
+
+        current_year = datetime.now().year
+
+        start_date = pd.Timestamp(f'{current_year}-01-01')
+
+        df = pd.DataFrame({
+            'week_start': [start_date + pd.Timedelta(weeks=i) for i in range(len(seasonality_weekly_values))],
+            'value': seasonality_weekly_values
+        })
+
+        df['month_num'] = df['week_start'].dt.month
+
+        monthly_sum_dict = df.groupby('month_num')['value'].sum().to_dict()
+
+        
+        # Store in cache
+        self._monthly_seasonality_cache[region_name] = monthly_sum_dict
+
+        return monthly_sum_dict
     
     def _calculate_seasonality_and_trend(self, target_date: pd.Timestamp, region_time_series_config: dict, region_name: str) -> tuple[float, float]:
         """ 
@@ -415,30 +464,10 @@ class TymDemandForecastService(IDemandForecastService):
         try:
             region_config = region_time_series_config[region_name]
             
-            # Use isocalendar week but be careful with year boundaries
-            start_week = target_date.replace(day=1).isocalendar().week
-            end_week = (target_date.replace(day=1) + pd.offsets.MonthEnd(1)).isocalendar().week
-            
-            # Seasonality list (usually 1-indexed by week number 1-52/53)
-            week_of_year_seasonality = region_config.get('week_of_year_seasonality', [])
-            if not week_of_year_seasonality:
-                return 0.0, 0.0
+            # Seasonality
+            monthly_sum_dict = self._calculate_region_specific_monthly_seasonality(region_time_series_config, region_name)
 
-            # Handle end < start (Dec/Jan boundary)
-            if end_week < start_week:
-                # Approximate for boundary cases or handle properly
-                # For now, let's just take 4 weeks if it's a wrap-around
-                indices = list(range(start_week - 1, len(week_of_year_seasonality))) + \
-                          list(range(0, end_week))
-            else:
-                indices = list(range(start_week - 1, end_week))
-
-            # Limit to max 5 weeks as per user requirements
-            if len(indices) > 5:
-                indices = indices[:5]
-
-            # Safe sum with bounds checking
-            seasonality = sum(week_of_year_seasonality[i] for i in indices if 0 <= i < len(week_of_year_seasonality))
+            seasonality = monthly_sum_dict.get(target_date.month, 0.0)
             
             # Trend
             trend_values = region_config.get('trend_values', [])
@@ -450,7 +479,7 @@ class TymDemandForecastService(IDemandForecastService):
             log.error(f"Error in _calculate_seasonality_and_trend: {str(e)}")
             return 0.0, 0.0
 
-    def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest) -> tuple[float, float]:
+    def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest, region_time_series_config: dict) -> tuple[float, float]:
         """ 
         Returns the weighted seasonality and trend for all regions.
         """
@@ -496,8 +525,6 @@ class TymDemandForecastService(IDemandForecastService):
             demand_shares = region_mean_pl / total_mean_pl
             
             # 2. Calculate weighted seasonality and trend
-            region_time_series_config = s3_client.read_json_as_dict(bucket=self.bucket, key=self.config.s3_region_time_series_config_key)
-            
             total_weighted_seasonality = 0.0
             total_weighted_trend = 0.0
             
