@@ -98,7 +98,9 @@ class TymDemandForecastService(IDemandForecastService):
                             sales_service=sales_service,
                             df=filtered_df, 
                             target_date=target_date, 
-                            params=params
+                            company_id=params.company_id,
+                            sales_type=params.sales_type,
+                            region_name=params.filter_value
                         )
         finally:
             db.close()
@@ -156,8 +158,16 @@ class TymDemandForecastService(IDemandForecastService):
                 seasonality, trend = self._calculate_all_regions_seasonality_and_trend(
                     df=df,
                     target_date=target_date,
-                    params=params,
+                    filter_name=params.filter_name,
+                    series_id=params.series_id,
                     region_time_series_config=region_time_series_config
+                )
+
+                self._calculate_all_regions_monthly_seasonality(
+                    df=df,
+                    region_time_series_config=region_time_series_config,
+                    filter_name=params.filter_name,
+                    series_id=params.series_id,
                 )
             except Exception as e:
                 log.error(f"Error calculating all regions seasonality and trend: {str(e)}")
@@ -287,7 +297,7 @@ class TymDemandForecastService(IDemandForecastService):
             log.exception(f"Error calculating change vs previous month actual sales: {e}")
             return 0.0, 0.0, 0.0
 
-    def _calculate_change_vs_same_month_last_year(self, sales_service: SalesService, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest) -> tuple[float, float, float]:
+    def _calculate_change_vs_same_month_last_year(self, sales_service: SalesService, df: pd.DataFrame, target_date: pd.Timestamp, company_id: str, sales_type: str, region_name: str) -> tuple[float, float, float]:
         """
         Calculates the percentage change for current month forecasted demand vs same month last year.
         Uses the Sales table for actual sales data.
@@ -305,11 +315,11 @@ class TymDemandForecastService(IDemandForecastService):
             
             try:
                 same_month_last_year_actual_sales = sales_service.get_monthly_sales_total(
-                    company_id=params.company_id,
+                    company_id=company_id,
                     year=same_month_last_year.year,
                     month=same_month_last_year.month,
-                    sales_type=params.sales_type,
-                    region_name=params.filter_value
+                    sales_type=sales_type,
+                    region_name=region_name
                 )
             except Exception as e:
                 log.exception(f"Error calculating change vs same month last year actual sales: {e}")
@@ -479,51 +489,60 @@ class TymDemandForecastService(IDemandForecastService):
             log.error(f"Error in _calculate_seasonality_and_trend: {str(e)}")
             return 0.0, 0.0
 
-    def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp, params: DemandForecastRequest, region_time_series_config: dict) -> tuple[float, float]:
+    def _calculate_demand_shares(self, df: pd.DataFrame, filter_name: str, series_id: int) -> pd.Series:
+        """
+        Calculates demand share for each region based on MeanPL, for the first 12 months from the min-date
+        """
+        # Take MeanPL for each region from the next 12th month from the min-date
+        min_date = df['forecast_date'].min()
+        target_share_date = min_date + pd.DateOffset(months=12)
+        
+        # Filter for MeanPL and series_id
+        mean_pl_df = df[
+            (df['name'] == 'MeanPL') & 
+            (df['filter_name'] == filter_name) & 
+            (df['series_id'] == series_id)
+        ].copy()
+        
+        if mean_pl_df.empty:
+            log.warning("No MeanPL data found for demand share calculation")
+            return pd.Series()
+
+        # Find data closest to 12 months after min_date
+        # We'll look for the latest date in the target month (next 12th month)
+        target_month_data = mean_pl_df[
+            (mean_pl_df['forecast_date'].dt.year == target_share_date.year) &
+            (mean_pl_df['forecast_date'].dt.month == target_share_date.month)
+        ]
+        
+        if target_month_data.empty:
+            # Fallback: take the last date available for each region if 12th month is not yet reached
+            log.warning(f"No data found for target share date {target_share_date}, using last available data for each region")
+            region_mean_pl = mean_pl_df.sort_values('forecast_date').groupby('filter_value').last()['prediction_cum']
+        else:
+            # Take the last record of the target month for each region
+            region_mean_pl = target_month_data.sort_values('forecast_date').groupby('filter_value').last()['prediction_cum']
+
+        region_mean_pl = region_mean_pl.drop(index='ALL', errors='ignore')
+
+        total_mean_pl = region_mean_pl.sum()
+        if total_mean_pl == 0:
+            log.warning("Total MeanPL is zero, cannot calculate demand share")
+            return pd.Series()
+
+        return region_mean_pl / total_mean_pl
+
+    def _calculate_all_regions_seasonality_and_trend(self, df: pd.DataFrame, target_date: pd.Timestamp, filter_name: str, series_id: str, region_time_series_config: dict) -> tuple[float, float]:
         """ 
         Returns the weighted seasonality and trend for all regions.
         """
         try:
             # 1. Calculate demand share for each region
-            # Take MeanPL for each region from the next 12th month from the min-date
-            min_date = df['forecast_date'].min()
-            target_share_date = min_date + pd.DateOffset(months=12)
+            demand_shares = self._calculate_demand_shares(df, filter_name=filter_name, series_id=series_id)
             
-            # Filter for MeanPL and series_id
-            mean_pl_df = df[
-                (df['name'] == 'MeanPL') & 
-                (df['filter_name'] == 'Region') & 
-                (df['series_id'] == params.series_id)
-            ].copy()
-            
-            if mean_pl_df.empty:
-                log.warning("No MeanPL data found for demand share calculation")
+            if demand_shares.empty:
                 return 0.0, 0.0
 
-            # Find data closest to 12 months after min_date
-            # We'll look for the latest date in the target month (next 12th month)
-            target_month_data = mean_pl_df[
-                (mean_pl_df['forecast_date'].dt.year == target_share_date.year) &
-                (mean_pl_df['forecast_date'].dt.month == target_share_date.month)
-            ]
-            
-            if target_month_data.empty:
-                # Fallback: take the last date available for each region if 12th month is not yet reached
-                log.warning(f"No data found for target share date {target_share_date}, using last available data for each region")
-                region_mean_pl = mean_pl_df.sort_values('forecast_date').groupby('filter_value').last()['prediction_cum']
-            else:
-                # Take the last record of the target month for each region
-                region_mean_pl = target_month_data.sort_values('forecast_date').groupby('filter_value').last()['prediction_cum']
-
-            region_mean_pl = region_mean_pl.drop(index='ALL', errors='ignore')
-
-            total_mean_pl = region_mean_pl.sum()
-            if total_mean_pl == 0:
-                log.warning("Total MeanPL is zero, cannot calculate demand share")
-                return 0.0, 0.0
-
-            demand_shares = region_mean_pl / total_mean_pl
-            
             # 2. Calculate weighted seasonality and trend
             total_weighted_seasonality = 0.0
             total_weighted_trend = 0.0
